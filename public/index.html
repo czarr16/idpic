@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ID Photo Studio</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --navy:     #2C3E50;
+  --navy2:    #34495E;
+  --slate:    #7F8C8D;
+  --lg:       #BDC3C7;
+  --offwhite: #ECF0F1;
+  --white:    #ffffff;
+  --accent:   #2980B9;
+  --green:    #27AE60;
+  --radius:   12px;
+  --shadow:   0 8px 32px rgba(0,0,0,0.13);
+}
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background: var(--offwhite);
+  min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+  padding: 32px 16px;
+}
+.upload-card {
+  background: var(--white); border-radius: 20px;
+  box-shadow: var(--shadow); padding: 48px 56px;
+  max-width: 540px; width: 100%; text-align: center;
+}
+.brand { display:flex; align-items:center; justify-content:center; gap:10px; margin-bottom:32px; }
+.brand-mark {
+  width:36px; height:36px; background:var(--navy); border-radius:8px;
+  display:flex; align-items:center; justify-content:center;
+  font-weight:800; font-size:14px; color:#fff;
+}
+.brand-name { font-size:18px; font-weight:700; color:var(--navy); }
+h1 { font-size:22px; font-weight:700; color:var(--navy); margin-bottom:8px; }
+.subtitle { font-size:14px; color:var(--slate); margin-bottom:32px; line-height:1.5; }
+.drop-zone {
+  border:2px dashed var(--lg); border-radius:var(--radius);
+  padding:40px 24px; cursor:pointer;
+  transition: border-color 0.2s, background 0.2s;
+  background:var(--offwhite);
+}
+.drop-zone:hover, .drop-zone.drag-over { border-color:var(--accent); background:#eaf4fb; }
+.drop-icon {
+  width:52px; height:52px; background:var(--navy2); border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  margin:0 auto 14px; font-size:22px; color:#fff;
+}
+.drop-label { font-size:15px; font-weight:600; color:var(--navy); margin-bottom:6px; }
+.drop-sub { font-size:12px; color:var(--slate); }
+#fileInput { display:none; }
+
+.overlay {
+  display:none; position:fixed; inset:0;
+  background:rgba(0,0,0,0.6); z-index:100;
+  align-items:center; justify-content:center; padding:16px;
+}
+.overlay.active { display:flex; }
+
+.modal {
+  background:var(--white); border-radius:20px; box-shadow:var(--shadow);
+  width:100%; max-width:920px; max-height:94vh; overflow-y:auto;
+  display:flex; flex-direction:column;
+}
+.modal-header {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:20px 28px; border-bottom:1px solid var(--lg);
+  position:sticky; top:0; background:var(--white); z-index:2;
+}
+.modal-title { font-size:16px; font-weight:700; color:var(--navy); }
+.modal-steps { display:flex; gap:6px; align-items:center; }
+.step-pill {
+  padding:3px 10px; border-radius:20px; font-size:11px; font-weight:600;
+  background:var(--offwhite); color:var(--slate);
+}
+.step-pill.active { background:var(--navy); color:#fff; }
+.step-pill.done   { background:var(--green); color:#fff; }
+.modal-close {
+  width:32px; height:32px; border-radius:50%; border:none;
+  background:var(--offwhite); cursor:pointer; font-size:16px; color:var(--slate);
+  display:flex; align-items:center; justify-content:center; transition:background 0.2s;
+}
+.modal-close:hover { background:var(--lg); }
+
+.step-panel { display:none; }
+.step-panel.active { display:flex; }
+
+/* STEP 1 */
+#step1 { flex-direction:row; }
+.preview-pane {
+  flex:1; padding:28px; border-right:1px solid var(--lg);
+  display:flex; flex-direction:column; gap:14px;
+}
+.pane-label { font-size:11px; font-weight:600; color:var(--slate); text-transform:uppercase; letter-spacing:.06em; }
+.canvas-wrap {
+  position:relative; border-radius:var(--radius); overflow:hidden;
+  display:flex; align-items:center; justify-content:center; min-height:280px;
+  background: repeating-conic-gradient(#ddd 0% 25%, #fff 0% 50%) 0 0/16px 16px;
+}
+.canvas-wrap.white-bg { background:#fff; }
+#previewCanvas { max-width:100%; max-height:360px; display:block; border-radius:4px; }
+.proc-overlay {
+  position:absolute; inset:0; background:rgba(255,255,255,.92);
+  display:none; flex-direction:column; align-items:center; justify-content:center; gap:12px;
+  border-radius:var(--radius);
+}
+.proc-overlay.active { display:flex; }
+.spinner {
+  width:44px; height:44px; border:4px solid var(--lg);
+  border-top-color:var(--navy); border-radius:50%;
+  animation:spin .8s linear infinite;
+}
+@keyframes spin { to { transform:rotate(360deg); } }
+.proc-text { font-size:13px; font-weight:600; color:var(--navy); }
+.proc-sub  { font-size:12px; color:var(--slate); }
+
+.notice { display:none; border-radius:8px; padding:9px 12px; font-size:12px; font-weight:600; align-items:center; gap:8px; }
+.notice.active { display:flex; }
+.notice.success { background:#e8f5e9; color:#2e7d32; }
+.notice.error   { background:#fdecea; color:#c0392b; }
+.notice.info    { background:#e3f2fd; color:#1565c0; }
+.notice.warning { background:#fff8e1; color:#f57f17; }
+
+.settings-pane { width:300px; padding:28px; display:flex; flex-direction:column; gap:22px; }
+.setting-group { display:flex; flex-direction:column; gap:10px; }
+.setting-title { font-size:13px; font-weight:600; color:var(--navy); }
+.bg-toggle { display:flex; gap:8px; }
+.bg-btn {
+  flex:1; padding:9px 0; border-radius:8px; border:1.5px solid var(--lg);
+  background:var(--white); font-size:12px; font-weight:600; color:var(--slate);
+  cursor:pointer; transition:all .15s; display:flex; align-items:center; justify-content:center; gap:6px;
+}
+.swatch { width:14px; height:14px; border-radius:3px; border:1px solid rgba(0,0,0,.12); }
+.bg-btn.active { border-color:var(--navy); background:var(--navy); color:#fff; }
+.bg-btn.active .swatch { border-color:rgba(255,255,255,.3); }
+
+.size-options { display:flex; flex-direction:column; gap:8px; }
+.size-opt {
+  display:flex; align-items:center; gap:12px; padding:12px 14px;
+  border-radius:10px; border:1.5px solid var(--lg);
+  cursor:pointer; transition:all .15s; background:var(--white);
+}
+.size-opt:hover { border-color:var(--navy2); }
+.size-opt.active { border-color:var(--navy); background:var(--offwhite); }
+.size-opt input[type=radio] { display:none; }
+.size-dot {
+  width:16px; height:16px; border-radius:50%; border:2px solid var(--lg); flex-shrink:0;
+  transition:all .15s; display:flex; align-items:center; justify-content:center;
+}
+.size-opt.active .size-dot { border-color:var(--navy); background:var(--navy); }
+.size-opt.active .size-dot::after { content:''; width:6px; height:6px; border-radius:50%; background:#fff; }
+.size-info { flex:1; }
+.size-name { font-size:13px; font-weight:600; color:var(--navy); }
+.size-dim  { font-size:11px; color:var(--slate); margin-top:1px; }
+.size-thumb { background:var(--lg); border-radius:3px; flex-shrink:0; }
+.divider { height:1px; background:var(--lg); }
+.actions { display:flex; flex-direction:column; gap:10px; margin-top:auto; }
+.btn {
+  width:100%; padding:13px; border-radius:10px; border:none;
+  font-size:14px; font-weight:600; cursor:pointer; transition:all .15s;
+  display:flex; align-items:center; justify-content:center; gap:8px;
+}
+.btn-primary   { background:var(--navy); color:#fff; }
+.btn-primary:hover   { background:var(--navy2); }
+.btn-secondary { background:var(--white); color:var(--navy); border:1.5px solid var(--navy); }
+.btn-secondary:hover { background:var(--offwhite); }
+.btn-ghost     { background:var(--offwhite); color:var(--slate); }
+.btn-ghost:hover     { background:var(--lg); }
+.btn-green     { background:var(--green); color:#fff; }
+.btn-green:hover     { background:#219a52; }
+.btn:disabled  { opacity:.4; cursor:not-allowed; }
+.action-note   { font-size:11px; color:var(--slate); text-align:center; line-height:1.4; }
+
+/* STEP 2 */
+#step2 { flex-direction:column; padding:28px; gap:20px; }
+.step2-title { font-size:18px; font-weight:700; color:var(--navy); }
+.step2-sub   { font-size:13px; color:var(--slate); }
+.pkg-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }
+.pkg-card {
+  border:1.5px solid var(--lg); border-radius:var(--radius);
+  padding:16px; cursor:pointer; transition:all .15s;
+  display:flex; flex-direction:column; gap:10px; background:var(--white);
+}
+.pkg-card:hover { border-color:var(--navy2); transform:translateY(-2px); }
+.pkg-card.active { border-color:var(--navy); background:var(--offwhite); }
+.pkg-thumb {
+  border-radius:8px; background:var(--lg); width:100%; aspect-ratio:1;
+  display:flex; align-items:center; justify-content:center;
+}
+.pkg-thumb-grid { display:flex; flex-direction:column; gap:2px; }
+.pkg-thumb-row  { display:flex; gap:2px; }
+.pkg-thumb-cell { background:rgba(44,62,80,.3); border-radius:2px; }
+.pkg-name  { font-size:13px; font-weight:700; color:var(--navy); }
+.pkg-desc  { font-size:11px; color:var(--slate); }
+.pkg-price { font-size:14px; font-weight:700; color:var(--navy); margin-top:2px; }
+.pkg-check {
+  width:20px; height:20px; border-radius:50%; background:var(--navy);
+  display:none; align-items:center; justify-content:center;
+  font-size:11px; color:#fff; font-weight:700;
+}
+.pkg-card.active .pkg-check { display:flex; }
+.step2-actions { display:flex; gap:12px; justify-content:flex-end; }
+.step2-actions .btn { width:auto; padding:13px 28px; }
+
+/* STEP 3 */
+#step3 {
+  flex-direction:column; align-items:center; justify-content:center;
+  padding:60px 28px; gap:20px; text-align:center; min-height:400px;
+}
+.gen-spinner {
+  width:64px; height:64px; border:5px solid var(--lg);
+  border-top-color:var(--navy); border-radius:50%;
+  animation:spin .8s linear infinite;
+}
+.gen-title { font-size:18px; font-weight:700; color:var(--navy); }
+.gen-sub   { font-size:13px; color:var(--slate); max-width:340px; line-height:1.5; }
+
+/* STEP 4 */
+#step4 {
+  flex-direction:column; align-items:center; justify-content:center;
+  padding:60px 28px; gap:20px; text-align:center; min-height:400px;
+}
+.done-icon {
+  width:72px; height:72px; border-radius:50%; background:var(--green);
+  display:flex; align-items:center; justify-content:center;
+  font-size:32px; color:#fff;
+}
+.done-title { font-size:20px; font-weight:700; color:var(--navy); }
+.done-sub   { font-size:13px; color:var(--slate); max-width:360px; line-height:1.5; }
+.done-actions { display:flex; flex-direction:column; gap:10px; width:100%; max-width:320px; }
+</style>
+</head>
+<body>
+
+<div class="upload-card">
+  <div class="brand">
+    <div class="brand-mark">ID</div>
+    <div class="brand-name">ID Photo Studio</div>
+  </div>
+  <h1>Create your ID photo</h1>
+  <p class="subtitle">Upload a photo to remove the background, choose your crop size and package, then download a print-ready Word file.</p>
+  <div class="drop-zone" id="dropZone">
+    <div class="drop-icon">↑</div>
+    <div class="drop-label">Click to upload or drag a photo here</div>
+    <div class="drop-sub">PNG or JPG · Square photo recommended</div>
+  </div>
+  <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp">
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="modalTitle">Edit Photo</div>
+      <div class="modal-steps">
+        <div class="step-pill active" id="pill1">1 Edit</div>
+        <div style="color:var(--lg);font-size:12px">›</div>
+        <div class="step-pill" id="pill2">2 Package</div>
+        <div style="color:var(--lg);font-size:12px">›</div>
+        <div class="step-pill" id="pill3">3 Download</div>
+      </div>
+      <button class="modal-close" id="closeBtn">✕</button>
+    </div>
+
+    <!-- STEP 1 -->
+    <div class="step-panel active" id="step1">
+      <div class="preview-pane">
+        <div class="pane-label">Preview</div>
+        <div class="canvas-wrap white-bg" id="canvasWrap">
+          <canvas id="previewCanvas"></canvas>
+          <div class="proc-overlay" id="procOverlay">
+            <div class="spinner"></div>
+            <div class="proc-text" id="procText">Removing background…</div>
+            <div class="proc-sub">This takes a few seconds</div>
+          </div>
+        </div>
+        <div class="notice success" id="noticeSuccess">✓ Background removed successfully</div>
+        <div class="notice error"   id="noticeError">⚠ Background removal failed — using original photo</div>
+        <div class="notice warning" id="noticeBgLib">⚠ Background removal not available (no internet) — using original photo</div>
+        <div class="notice info active" id="noticeInfo">ℹ Upload a photo to get started</div>
+      </div>
+
+      <div class="settings-pane">
+        <div class="setting-group">
+          <div class="setting-title">Background</div>
+          <div class="bg-toggle">
+            <button class="bg-btn active" id="bgWhite">
+              <span class="swatch" style="background:#fff"></span> White
+            </button>
+            <button class="bg-btn" id="bgTransparent">
+              <span class="swatch" style="background:repeating-conic-gradient(#ccc 0% 25%,#fff 0% 50%) 0/8px 8px"></span> Transparent
+            </button>
+          </div>
+        </div>
+        <div class="divider"></div>
+        <div class="setting-group">
+          <div class="setting-title">Crop Size</div>
+          <div class="size-options" id="sizeOptions">
+            <label class="size-opt active" data-size="2x2">
+              <input type="radio" name="size" value="2x2" checked>
+              <div class="size-dot"></div>
+              <div class="size-info"><div class="size-name">2×2</div><div class="size-dim">2.00 × 2.00 inches</div></div>
+              <div class="size-thumb" style="width:32px;height:32px;"></div>
+            </label>
+            <label class="size-opt" data-size="1x1">
+              <input type="radio" name="size" value="1x1">
+              <div class="size-dot"></div>
+              <div class="size-info"><div class="size-name">1×1</div><div class="size-dim">1.00 × 1.00 inches</div></div>
+              <div class="size-thumb" style="width:20px;height:20px;"></div>
+            </label>
+            <label class="size-opt" data-size="passport">
+              <input type="radio" name="size" value="passport">
+              <div class="size-dot"></div>
+              <div class="size-info"><div class="size-name">Passport</div><div class="size-dim">1.37 × 1.77 inches</div></div>
+              <div class="size-thumb" style="width:22px;height:28px;"></div>
+            </label>
+          </div>
+        </div>
+        <div class="divider"></div>
+        <div class="actions">
+          <button class="btn btn-secondary" id="downloadPhotoBtn" disabled>⬇ Download photo only</button>
+          <button class="btn btn-primary"   id="nextToPackageBtn" disabled>Choose package →</button>
+          <p class="action-note">"Choose package" selects a print layout and generates a Word file.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- STEP 2 -->
+    <div class="step-panel" id="step2">
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        <div class="step2-title">Choose a Package</div>
+        <div class="step2-sub">Select how you want the photo laid out on the A4 print sheet.</div>
+      </div>
+      <div class="pkg-grid" id="pkgGrid"></div>
+      <div class="step2-actions">
+        <button class="btn btn-ghost" id="backToEditBtn" style="width:auto;padding:13px 24px;">← Back</button>
+        <button class="btn btn-green" id="generateBtn" disabled>Generate Word file →</button>
+      </div>
+    </div>
+
+    <!-- STEP 3 -->
+    <div class="step-panel" id="step3">
+      <div class="gen-spinner"></div>
+      <div class="gen-title">Generating your Word file…</div>
+      <div class="gen-sub">Laying out your photo into the selected package on an A4 sheet.</div>
+    </div>
+
+    <!-- STEP 4 -->
+    <div class="step-panel" id="step4">
+      <div class="done-icon">✓</div>
+      <div class="done-title">Your file is ready!</div>
+      <div class="done-sub" id="doneSub">Your print-ready Word file has been downloaded.</div>
+      <div class="done-actions">
+        <button class="btn btn-primary"   id="redownloadBtn">⬇ Download again</button>
+        <button class="btn btn-secondary" id="newPhotoBtn">Upload another photo</button>
+        <button class="btn btn-ghost"     id="closeAfterDoneBtn">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────
+// State
+// ─────────────────────────────────────────
+var removedBlob  = null;
+var currentBg    = 'white';
+var currentSize  = '2x2';
+var currentPkg   = null;
+var bgRemoveFn   = null; // set when library loads
+
+var SIZES = {
+  '2x2':     { w: 2.00, h: 2.00 },
+  '1x1':     { w: 1.00, h: 1.00 },
+  'passport':{ w: 1.37, h: 1.77 },
+};
+var DPI = 300;
+
+var PACKAGES = [
+  { id:1, name:'Package 1', price:'₱30', desc:'8 pcs · 1×1',
+    thumb:{ rows:[[1,1,1,1,1,1,1,1]], wCell:5, hCell:5 } },
+  { id:2, name:'Package 2', price:'₱40', desc:'8 pcs · 2×2',
+    thumb:{ rows:[[1,1,1,1],[1,1,1,1]], wCell:11, hCell:11 } },
+  { id:3, name:'Package 3', price:'₱50', desc:'4×2x2 + 8×1x1',
+    thumb:{ rows:[[1,1,1,1],[2,2,2,2,2,2,2,2]], wCell:11, hCell:11, smallH:5 } },
+  { id:4, name:'Package 4', price:'₱30', desc:'10 pcs · Passport',
+    thumb:{ rows:[[1,1,1,1,1],[1,1,1,1,1]], wCell:8, hCell:11 } },
+];
+
+// ─────────────────────────────────────────
+// Load background removal library async
+// Runs silently — never blocks or crashes the page
+// ─────────────────────────────────────────
+setTimeout(function() {
+  import('https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.4.5/dist/browser.mjs')
+    .then(function(mod) {
+      bgRemoveFn = mod.removeBackground;
+      console.log('Background removal ready.');
+    })
+    .catch(function(e) {
+      console.warn('Background removal unavailable:', e.message);
+      bgRemoveFn = null;
+    });
+}, 100);
+
+// ─────────────────────────────────────────
+// DOM refs
+// ─────────────────────────────────────────
+var dropZone         = document.getElementById('dropZone');
+var fileInput        = document.getElementById('fileInput');
+var overlay          = document.getElementById('overlay');
+var closeBtn         = document.getElementById('closeBtn');
+var canvasWrap       = document.getElementById('canvasWrap');
+var previewCanvas    = document.getElementById('previewCanvas');
+var procOverlay      = document.getElementById('procOverlay');
+var procText         = document.getElementById('procText');
+var noticeSuccess    = document.getElementById('noticeSuccess');
+var noticeError      = document.getElementById('noticeError');
+var noticeBgLib      = document.getElementById('noticeBgLib');
+var noticeInfo       = document.getElementById('noticeInfo');
+var bgWhiteBtn       = document.getElementById('bgWhite');
+var bgTransBtn       = document.getElementById('bgTransparent');
+var sizeOptionsEl    = document.getElementById('sizeOptions');
+var downloadPhotoBtn = document.getElementById('downloadPhotoBtn');
+var nextToPackageBtn = document.getElementById('nextToPackageBtn');
+var pkgGrid          = document.getElementById('pkgGrid');
+var backToEditBtn    = document.getElementById('backToEditBtn');
+var generateBtn      = document.getElementById('generateBtn');
+var redownloadBtn    = document.getElementById('redownloadBtn');
+var newPhotoBtn      = document.getElementById('newPhotoBtn');
+var closeAfterDoneBtn= document.getElementById('closeAfterDoneBtn');
+var doneSub          = document.getElementById('doneSub');
+var modalTitle       = document.getElementById('modalTitle');
+var pill1            = document.getElementById('pill1');
+var pill2            = document.getElementById('pill2');
+var pill3            = document.getElementById('pill3');
+
+// ─────────────────────────────────────────
+// Step navigation
+// ─────────────────────────────────────────
+function goStep(n) {
+  document.querySelectorAll('.step-panel').forEach(function(p,i) {
+    p.classList.toggle('active', i+1===n);
+  });
+  modalTitle.textContent = ['Edit Photo','Choose Package','Generating…','Done!'][n-1];
+  [pill1,pill2,pill3].forEach(function(p,i) {
+    p.classList.remove('active','done');
+    if (i+1 < n) p.classList.add('done');
+    else if (i+1 === n) p.classList.add('active');
+  });
+}
+
+// ─────────────────────────────────────────
+// Upload — attached immediately, no module dependency
+// ─────────────────────────────────────────
+dropZone.addEventListener('click', function() { fileInput.click(); });
+dropZone.addEventListener('dragover', function(e) { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', function() { dropZone.classList.remove('drag-over'); });
+dropZone.addEventListener('drop', function(e) {
+  e.preventDefault(); dropZone.classList.remove('drag-over');
+  if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', function() {
+  if (fileInput.files[0]) handleFile(fileInput.files[0]);
+});
+
+async function handleFile(file) {
+  if (!file.type.startsWith('image/')) return;
+
+  // Reset
+  removedBlob = null;
+  noticeSuccess.classList.remove('active');
+  noticeError.classList.remove('active');
+  noticeBgLib.classList.remove('active');
+  noticeInfo.classList.remove('active');
+  downloadPhotoBtn.disabled = true;
+  nextToPackageBtn.disabled = true;
+  procOverlay.classList.add('active');
+  overlay.classList.add('active');
+  goStep(1);
+
+  if (bgRemoveFn) {
+    // Background removal available
+    procText.textContent = 'Removing background…';
+    try {
+      removedBlob = await bgRemoveFn(file, { model:'medium', output:{ format:'image/png', quality:1 } });
+      noticeSuccess.classList.add('active');
+    } catch(e) {
+      console.warn('BG removal error:', e);
+      removedBlob = file;
+      noticeError.classList.add('active');
+    }
+  } else {
+    // Library not loaded yet — use original photo
+    procText.textContent = 'Loading photo…';
+    await new Promise(r => setTimeout(r, 400));
+    removedBlob = file;
+    noticeBgLib.classList.add('active');
+  }
+
+  procOverlay.classList.remove('active');
+  await renderPreview();
+  downloadPhotoBtn.disabled = false;
+  nextToPackageBtn.disabled = false;
+}
+
+// ─────────────────────────────────────────
+// Background toggle
+// ─────────────────────────────────────────
+bgWhiteBtn.addEventListener('click', function() { setBackground('white'); });
+bgTransBtn.addEventListener('click', function() { setBackground('transparent'); });
+function setBackground(bg) {
+  currentBg = bg;
+  bgWhiteBtn.classList.toggle('active', bg==='white');
+  bgTransBtn.classList.toggle('active', bg==='transparent');
+  canvasWrap.classList.toggle('white-bg', bg==='white');
+  if (removedBlob) renderPreview();
+}
+
+// ─────────────────────────────────────────
+// Size toggle
+// ─────────────────────────────────────────
+sizeOptionsEl.querySelectorAll('.size-opt').forEach(function(opt) {
+  opt.addEventListener('click', function() {
+    sizeOptionsEl.querySelectorAll('.size-opt').forEach(function(o) { o.classList.remove('active'); });
+    opt.classList.add('active');
+    currentSize = opt.dataset.size;
+    if (removedBlob) renderPreview();
+  });
+});
+
+// ─────────────────────────────────────────
+// Render preview canvas
+// ─────────────────────────────────────────
+async function renderPreview() {
+  if (!removedBlob) return;
+  var imgEl = new Image();
+  var url = URL.createObjectURL(removedBlob);
+  imgEl.src = url;
+  await new Promise(function(r) { imgEl.onload = r; });
+  var s = SIZES[currentSize];
+  var outW = Math.round(s.w * DPI);
+  var outH = Math.round(s.h * DPI);
+  previewCanvas.width  = outW;
+  previewCanvas.height = outH;
+  var ctx = previewCanvas.getContext('2d');
+  ctx.clearRect(0,0,outW,outH);
+  if (currentBg === 'white') { ctx.fillStyle='#fff'; ctx.fillRect(0,0,outW,outH); }
+  var srcAR = imgEl.naturalWidth / imgEl.naturalHeight;
+  var dstAR = outW / outH;
+  var sx,sy,sw,sh;
+  if (srcAR > dstAR) { sh=imgEl.naturalHeight; sw=sh*dstAR; sx=(imgEl.naturalWidth-sw)/2; sy=0; }
+  else               { sw=imgEl.naturalWidth;  sh=sw/dstAR; sx=0; sy=(imgEl.naturalHeight-sh)/2; }
+  ctx.drawImage(imgEl,sx,sy,sw,sh,0,0,outW,outH);
+  URL.revokeObjectURL(url);
+}
+
+// ─────────────────────────────────────────
+// Download photo only
+// ─────────────────────────────────────────
+downloadPhotoBtn.addEventListener('click', function() {
+  previewCanvas.toBlob(function(blob) {
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'id_photo_' + currentSize + '_' + currentBg + '.png';
+    a.click();
+  }, 'image/png', 1.0);
+});
+
+// ─────────────────────────────────────────
+// Package cards
+// ─────────────────────────────────────────
+nextToPackageBtn.addEventListener('click', function() { buildPackageCards(); goStep(2); });
+backToEditBtn.addEventListener('click', function() { goStep(1); });
+
+function buildPackageCards() {
+  pkgGrid.innerHTML = '';
+  PACKAGES.forEach(function(pkg) {
+    var card = document.createElement('div');
+    card.className = 'pkg-card' + (currentPkg===pkg.id ? ' active':'');
+
+    var thumb = document.createElement('div');
+    thumb.className = 'pkg-thumb';
+    var tGrid = document.createElement('div');
+    tGrid.className = 'pkg-thumb-grid';
+    pkg.thumb.rows.forEach(function(row, ri) {
+      var tRow = document.createElement('div');
+      tRow.className = 'pkg-thumb-row';
+      row.forEach(function() {
+        var c = document.createElement('div');
+        c.className = 'pkg-thumb-cell';
+        var small = pkg.thumb.smallH && ri===1;
+        c.style.width  = (small ? Math.round(pkg.thumb.wCell*0.55) : pkg.thumb.wCell)+'px';
+        c.style.height = (small ? pkg.thumb.smallH : pkg.thumb.hCell)+'px';
+        tRow.appendChild(c);
+      });
+      tGrid.appendChild(tRow);
+    });
+    thumb.appendChild(tGrid);
+
+    var info = document.createElement('div');
+    info.style.cssText = 'display:flex;flex-direction:column;gap:4px;';
+    info.innerHTML =
+      '<div style="display:flex;align-items:center;justify-content:space-between;">' +
+        '<div class="pkg-name">' + pkg.name + '</div>' +
+        '<div class="pkg-check">✓</div>' +
+      '</div>' +
+      '<div class="pkg-desc">' + pkg.desc + '</div>' +
+      '<div class="pkg-price">' + pkg.price + '</div>';
+
+    card.appendChild(thumb);
+    card.appendChild(info);
+    card.addEventListener('click', function() {
+      currentPkg = pkg.id;
+      document.querySelectorAll('.pkg-card').forEach(function(c) { c.classList.remove('active'); });
+      card.classList.add('active');
+      generateBtn.disabled = false;
+    });
+    pkgGrid.appendChild(card);
+  });
+}
+
+// ─────────────────────────────────────────
+// Generate Word file — POST to server
+// ─────────────────────────────────────────
+generateBtn.addEventListener('click', async function() {
+  if (!currentPkg || !removedBlob) return;
+  goStep(3);
+  try {
+    var photoBlob = await new Promise(function(res) {
+      previewCanvas.toBlob(res, 'image/png', 1.0);
+    });
+    var formData = new FormData();
+    formData.append('photo',   photoBlob, 'photo.png');
+    formData.append('package', currentPkg);
+
+    var response = await fetch('/generate', { method:'POST', body:formData });
+    if (!response.ok) {
+      var err = await response.json();
+      throw new Error(err.error || 'Server error');
+    }
+    var docxBlob = await response.blob();
+    var pkg = PACKAGES.find(function(p) { return p.id===currentPkg; });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(docxBlob);
+    a.download = pkg.name.replace(' ','_') + '_layout.docx';
+    a.click();
+    doneSub.textContent = pkg.name + ' (' + pkg.desc + ') has been laid out on an A4 sheet and downloaded.';
+    goStep(4);
+  } catch(err) {
+    console.error(err);
+    alert('Error generating Word file: ' + err.message);
+    goStep(2);
+  }
+});
+
+redownloadBtn.addEventListener('click', function() { generateBtn.click(); });
+newPhotoBtn.addEventListener('click', function() {
+  overlay.classList.remove('active');
+  fileInput.value = '';
+  setTimeout(function() { fileInput.click(); }, 100);
+});
+closeAfterDoneBtn.addEventListener('click', function() { overlay.classList.remove('active'); });
+closeBtn.addEventListener('click', function() { overlay.classList.remove('active'); });
+overlay.addEventListener('click', function(e) { if(e.target===overlay) overlay.classList.remove('active'); });
+</script>
+</body>
+</html>
