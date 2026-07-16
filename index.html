@@ -363,6 +363,9 @@ h1 { font-size:22px; font-weight:700; color:var(--navy); margin-bottom:8px; }
   </div>
 </div>
 
+<!-- docx library for in-browser Word file generation -->
+<script src="https://cdn.jsdelivr.net/npm/docx@9.0.0/build/index.umd.min.js"></script>
+
 <script>
 // ─────────────────────────────────────────
 // State
@@ -625,28 +628,110 @@ function buildPackageCards() {
 }
 
 // ─────────────────────────────────────────
-// Generate Word file — POST to server
+// Generate Word file — runs entirely in browser (no server needed)
+// Works on GitHub Pages, Render, or anywhere
 // ─────────────────────────────────────────
+var EMU  = 914400;
+var TWIP = 1440;
+var PAGE_W_TWIP  = 11906;
+var PAGE_H_TWIP  = 16838;
+var MARGIN_TWIP  = 173;
+var MARGIN_IN    = MARGIN_TWIP / TWIP;
+var BORDER_COLOR = 'D9D9D9';
+var BORDER_W_EMU = 3175;
+
+function inchToEmu(inches) { return Math.round(inches * EMU); }
+
+function makeFloatingImg(imageBuffer, wIn, hIn, xIn, yIn) {
+  var d = window.docx;
+  return new d.ImageRun({
+    data: imageBuffer,
+    transformation: {
+      width:  inchToEmu(wIn) / 9525,
+      height: inchToEmu(hIn) / 9525,
+    },
+    floating: {
+      horizontalPosition: {
+        relative: d.HorizontalPositionRelativeFrom.PAGE,
+        offset: inchToEmu(xIn),
+      },
+      verticalPosition: {
+        relative: d.VerticalPositionRelativeFrom.PAGE,
+        offset: inchToEmu(yIn),
+      },
+      wrap: { type: d.TextWrappingType.NONE },
+      behindDocument: false,
+      zIndex: 1,
+    },
+    outline: {
+      type: 'solidFill',
+      solidFillType: 'rgb',
+      value: BORDER_COLOR,
+      width: BORDER_W_EMU,
+    },
+  });
+}
+
+function buildImages(packageId, imageBuffer) {
+  var imgs = [];
+  if (packageId === 1) {
+    for (var i=0; i<8; i++)
+      imgs.push(makeFloatingImg(imageBuffer, 1, 1, MARGIN_IN + i*1, MARGIN_IN));
+  } else if (packageId === 2) {
+    for (var r=0; r<2; r++)
+      for (var c=0; c<4; c++)
+        imgs.push(makeFloatingImg(imageBuffer, 2, 2, MARGIN_IN + c*2, MARGIN_IN + r*2));
+  } else if (packageId === 3) {
+    for (var c=0; c<4; c++)
+      imgs.push(makeFloatingImg(imageBuffer, 2, 2, MARGIN_IN + c*2, MARGIN_IN));
+    for (var c=0; c<8; c++)
+      imgs.push(makeFloatingImg(imageBuffer, 1, 1, MARGIN_IN + c*1, MARGIN_IN + 2));
+  } else if (packageId === 4) {
+    var pw = 1252220 / EMU;
+    var ph = 1617980 / EMU;
+    var startX = 524510 / EMU;
+    var stepX  = 1257935 / EMU;
+    var rowY   = [17780/EMU, 1641475/EMU];
+    for (var r=0; r<2; r++)
+      for (var c=0; c<5; c++)
+        imgs.push(makeFloatingImg(imageBuffer, pw, ph, startX + c*stepX, rowY[r]));
+  }
+  return imgs;
+}
+
 generateBtn.addEventListener('click', async function() {
   if (!currentPkg || !removedBlob) return;
   goStep(3);
   try {
-    var photoBlob = await new Promise(function(res) {
-      previewCanvas.toBlob(res, 'image/png', 1.0);
-    });
-    var formData = new FormData();
-    formData.append('photo',   photoBlob, 'photo.png');
-    formData.append('package', currentPkg);
+    // Check docx library is loaded
+    if (!window.docx) throw new Error('Document library not loaded yet. Please wait a moment and try again.');
 
-    var response = await fetch('/generate', { method:'POST', body:formData });
-    if (!response.ok) {
-      var err = await response.json();
-      throw new Error(err.error || 'Server error');
-    }
-    var docxBlob = await response.blob();
-    var pkg = PACKAGES.find(function(p) { return p.id===currentPkg; });
+    // Get canvas image as ArrayBuffer
+    var photoBlob = await new Promise(function(res) { previewCanvas.toBlob(res, 'image/png', 1.0); });
+    var arrayBuf  = await photoBlob.arrayBuffer();
+    var imageBuffer = new Uint8Array(arrayBuf);
+
+    // Build document
+    var d = window.docx;
+    var images = buildImages(currentPkg, imageBuffer);
+    var doc = new d.Document({
+      sections: [{
+        properties: {
+          page: {
+            size:   { width: PAGE_W_TWIP, height: PAGE_H_TWIP },
+            margin: { top: MARGIN_TWIP, right: MARGIN_TWIP, bottom: MARGIN_TWIP, left: MARGIN_TWIP },
+          },
+        },
+        children: [new d.Paragraph({ children: images })],
+      }],
+    });
+
+    // Pack and download
+    var buf  = await d.Packer.toBuffer(doc);
+    var blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+    var pkg  = PACKAGES.find(function(p) { return p.id===currentPkg; });
     var a = document.createElement('a');
-    a.href = URL.createObjectURL(docxBlob);
+    a.href = URL.createObjectURL(blob);
     a.download = pkg.name.replace(' ','_') + '_layout.docx';
     a.click();
     doneSub.textContent = pkg.name + ' (' + pkg.desc + ') has been laid out on an A4 sheet and downloaded.';
