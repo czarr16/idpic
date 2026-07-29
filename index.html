@@ -99,11 +99,22 @@ h1 { font-size:22px; font-weight:700; color:var(--navy); margin-bottom:8px; }
 .pane-label { font-size:11px; font-weight:600; color:var(--slate); text-transform:uppercase; letter-spacing:.06em; }
 .canvas-wrap {
   position:relative; border-radius:var(--radius); overflow:hidden;
-  display:flex; align-items:center; justify-content:center; min-height:280px;
+  display:flex; align-items:center; justify-content:center;
   background: repeating-conic-gradient(#ddd 0% 25%, #fff 0% 50%) 0 0/16px 16px;
+  width:100%; aspect-ratio:1; cursor:grab; user-select:none;
 }
 .canvas-wrap.white-bg { background:#fff; }
-#previewCanvas { max-width:100%; max-height:360px; display:block; border-radius:4px; }
+.canvas-wrap.grabbing { cursor:grabbing; }
+#editorCanvas { display:block; width:100%; height:100%; border-radius:4px; }
+#previewCanvas { display:none; }
+.zoom-row {
+  display:flex; align-items:center; gap:10px;
+}
+.zoom-label { font-size:11px; font-weight:600; color:var(--slate); white-space:nowrap; }
+#zoomSlider {
+  flex:1; accent-color:var(--navy); cursor:pointer;
+}
+.zoom-val { font-size:11px; color:var(--navy); font-weight:600; min-width:36px; text-align:right; }
 .proc-overlay {
   position:absolute; inset:0; background:rgba(255,255,255,.92);
   display:none; flex-direction:column; align-items:center; justify-content:center; gap:12px;
@@ -271,12 +282,18 @@ h1 { font-size:22px; font-weight:700; color:var(--navy); margin-bottom:8px; }
       <div class="preview-pane">
         <div class="pane-label">Preview</div>
         <div class="canvas-wrap white-bg" id="canvasWrap">
+          <canvas id="editorCanvas"></canvas>
           <canvas id="previewCanvas"></canvas>
           <div class="proc-overlay" id="procOverlay">
             <div class="spinner"></div>
             <div class="proc-text" id="procText">Removing background…</div>
             <div class="proc-sub">This takes a few seconds</div>
           </div>
+        </div>
+        <div class="zoom-row">
+          <span class="zoom-label">🔍 Zoom</span>
+          <input type="range" id="zoomSlider" min="50" max="200" value="100" step="1">
+          <span class="zoom-val" id="zoomVal">100%</span>
         </div>
         <div class="notice success" id="noticeSuccess">✓ Background removed successfully</div>
         <div class="notice error"   id="noticeError">⚠ Background removal failed — using original photo</div>
@@ -525,48 +542,217 @@ function setBackground(bg) {
   if (removedBlob) renderPreview();
 }
 
-// ─────────────────────────────────────────
-// Size toggle
-// ─────────────────────────────────────────
-sizeOptionsEl.querySelectorAll('.size-opt').forEach(function(opt) {
-  opt.addEventListener('click', function() {
-    sizeOptionsEl.querySelectorAll('.size-opt').forEach(function(o) { o.classList.remove('active'); });
-    opt.classList.add('active');
-    currentSize = opt.dataset.size;
-    if (removedBlob) renderPreview();
-  });
-});
+// Size toggle handled inside editor code below
 
 // ─────────────────────────────────────────
-// Render preview canvas
+// Interactive crop editor
 // ─────────────────────────────────────────
-async function renderPreview() {
-  if (!removedBlob) return;
-  var imgEl = new Image();
-  var url = URL.createObjectURL(removedBlob);
-  imgEl.src = url;
-  await new Promise(function(r) { imgEl.onload = r; });
+var editorCanvas  = document.getElementById('editorCanvas');
+var zoomSlider    = document.getElementById('zoomSlider');
+var zoomVal       = document.getElementById('zoomVal');
+var loadedImage   = null; // the HTMLImageElement after bg removal
+
+// Editor state
+var pan = { x: 0, y: 0 };       // offset of image centre from canvas centre (in canvas px)
+var zoom = 1.0;                   // 1.0 = fit-to-frame
+var baseScale = 1.0;              // scale at zoom=1 that makes photo fill the frame
+var isDragging = false;
+var dragStart  = { x:0, y:0, px:0, py:0 };
+
+// Size of frame in output pixels (300 dpi)
+function getOutputSize() {
   var s = SIZES[currentSize];
-  var outW = Math.round(s.w * DPI);
-  var outH = Math.round(s.h * DPI);
+  return { w: Math.round(s.w * DPI), h: Math.round(s.h * DPI) };
+}
+
+// Resize editor canvas to fill its container, keep aspect ratio of current size
+function resizeEditorCanvas() {
+  var wrap = canvasWrap;
+  var rect = wrap.getBoundingClientRect();
+  var displaySize = Math.min(rect.width, rect.height || rect.width);
+  var outSize = getOutputSize();
+  var ar = outSize.w / outSize.h;
+  var dispW, dispH;
+  if (ar >= 1) { dispW = displaySize; dispH = Math.round(displaySize / ar); }
+  else         { dispH = displaySize; dispW = Math.round(displaySize * ar); }
+  editorCanvas.width  = dispW;
+  editorCanvas.height = dispH;
+  // Update canvasWrap aspect-ratio dynamically
+  wrap.style.aspectRatio = ar;
+}
+
+function drawEditor() {
+  if (!loadedImage) return;
+  resizeEditorCanvas();
+  var cw = editorCanvas.width;
+  var ch = editorCanvas.height;
+  var ctx = editorCanvas.getContext('2d');
+
+  // Background
+  ctx.clearRect(0,0,cw,ch);
+  if (currentBg === 'white') { ctx.fillStyle='#fff'; ctx.fillRect(0,0,cw,ch); }
+
+  // Calculate base scale: fit image to fill the frame at zoom=1
+  var imgW = loadedImage.naturalWidth;
+  var imgH = loadedImage.naturalHeight;
+  var frameAR = cw / ch;
+  var imgAR   = imgW / imgH;
+  if (imgAR > frameAR) baseScale = ch / imgH;
+  else                 baseScale = cw / imgW;
+
+  var scale = baseScale * zoom;
+  var drawW = imgW * scale;
+  var drawH = imgH * scale;
+
+  // Draw image centred + panned
+  var cx = cw/2 + pan.x;
+  var cy = ch/2 + pan.y;
+  ctx.drawImage(loadedImage, cx - drawW/2, cy - drawH/2, drawW, drawH);
+
+  // 3x3 grid overlay
+  ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+  ctx.lineWidth = 0.8;
+  for (var i=1; i<3; i++) {
+    ctx.beginPath(); ctx.moveTo(cw*i/3, 0); ctx.lineTo(cw*i/3, ch); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, ch*i/3); ctx.lineTo(cw, ch*i/3); ctx.stroke();
+  }
+  // Slightly darker lines for visibility on light bg
+  ctx.strokeStyle = 'rgba(0,0,0,0.12)';
+  ctx.lineWidth = 0.8;
+  for (var i=1; i<3; i++) {
+    ctx.beginPath(); ctx.moveTo(cw*i/3, 0); ctx.lineTo(cw*i/3, ch); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, ch*i/3); ctx.lineTo(cw, ch*i/3); ctx.stroke();
+  }
+
+  // Crop outline border
+  ctx.strokeStyle = 'rgba(41,128,185,0.9)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([]);
+  ctx.strokeRect(1, 1, cw-2, ch-2);
+}
+
+// Drag to pan
+canvasWrap.addEventListener('mousedown', function(e) {
+  if (!loadedImage) return;
+  isDragging = true;
+  dragStart = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y };
+  canvasWrap.classList.add('grabbing');
+});
+window.addEventListener('mousemove', function(e) {
+  if (!isDragging) return;
+  pan.x = dragStart.px + (e.clientX - dragStart.x);
+  pan.y = dragStart.py + (e.clientY - dragStart.y);
+  drawEditor();
+});
+window.addEventListener('mouseup', function() {
+  isDragging = false;
+  canvasWrap.classList.remove('grabbing');
+});
+
+// Touch support
+canvasWrap.addEventListener('touchstart', function(e) {
+  if (!loadedImage || e.touches.length !== 1) return;
+  isDragging = true;
+  dragStart = { x: e.touches[0].clientX, y: e.touches[0].clientY, px: pan.x, py: pan.y };
+}, { passive: true });
+window.addEventListener('touchmove', function(e) {
+  if (!isDragging || e.touches.length !== 1) return;
+  pan.x = dragStart.px + (e.touches[0].clientX - dragStart.x);
+  pan.y = dragStart.py + (e.touches[0].clientY - dragStart.y);
+  drawEditor();
+}, { passive: true });
+window.addEventListener('touchend', function() { isDragging = false; });
+
+// Zoom slider
+zoomSlider.addEventListener('input', function() {
+  zoom = parseFloat(this.value) / 100;
+  zoomVal.textContent = this.value + '%';
+  drawEditor();
+});
+
+// Reset pan/zoom when size changes
+function resetEditor() {
+  pan = { x:0, y:0 };
+  zoom = 1.0;
+  zoomSlider.value = 100;
+  zoomVal.textContent = '100%';
+}
+
+// Render final output to hidden previewCanvas for download/Word generation
+function renderPreviewFromEditor() {
+  if (!loadedImage) return;
+  var outSize = getOutputSize();
+  var outW = outSize.w;
+  var outH = outSize.h;
   previewCanvas.width  = outW;
   previewCanvas.height = outH;
   var ctx = previewCanvas.getContext('2d');
   ctx.clearRect(0,0,outW,outH);
   if (currentBg === 'white') { ctx.fillStyle='#fff'; ctx.fillRect(0,0,outW,outH); }
-  var srcAR = imgEl.naturalWidth / imgEl.naturalHeight;
-  var dstAR = outW / outH;
-  var sx,sy,sw,sh;
-  if (srcAR > dstAR) { sh=imgEl.naturalHeight; sw=sh*dstAR; sx=(imgEl.naturalWidth-sw)/2; sy=0; }
-  else               { sw=imgEl.naturalWidth;  sh=sw/dstAR; sx=0; sy=(imgEl.naturalHeight-sh)/2; }
-  ctx.drawImage(imgEl,sx,sy,sw,sh,0,0,outW,outH);
-  URL.revokeObjectURL(url);
+
+  // Reproduce same pan/zoom at output resolution
+  var imgW = loadedImage.naturalWidth;
+  var imgH = loadedImage.naturalHeight;
+  var frameAR = outW / outH;
+  var imgAR   = imgW / imgH;
+  var bs;
+  if (imgAR > frameAR) bs = outH / imgH;
+  else                 bs = outW / imgW;
+
+  var scale = bs * zoom;
+  var drawW = imgW * scale;
+  var drawH = imgH * scale;
+
+  // Pan needs to scale from display canvas to output canvas
+  var edW = editorCanvas.width;
+  var edH = editorCanvas.height;
+  var scaleX = outW / edW;
+  var scaleY = outH / edH;
+  var cx = outW/2 + pan.x * scaleX;
+  var cy = outH/2 + pan.y * scaleY;
+
+  ctx.drawImage(loadedImage, cx - drawW/2, cy - drawH/2, drawW, drawH);
 }
+
+async function renderPreview() {
+  if (!removedBlob) return;
+  if (!loadedImage) {
+    loadedImage = new Image();
+    var url = URL.createObjectURL(removedBlob);
+    loadedImage.src = url;
+    await new Promise(function(r) { loadedImage.onload = r; });
+    URL.revokeObjectURL(url);
+  }
+  resetEditor();
+  drawEditor();
+  renderPreviewFromEditor();
+}
+
+// Redraw editor when bg changes
+var _origSetBackground = setBackground;
+function setBackground(bg) {
+  currentBg = bg;
+  bgWhiteBtn.classList.toggle('active', bg==='white');
+  bgTransBtn.classList.toggle('active', bg==='transparent');
+  canvasWrap.classList.toggle('white-bg', bg==='white');
+  if (loadedImage) drawEditor();
+}
+
+// Redraw when size changes
+sizeOptionsEl.querySelectorAll('.size-opt').forEach(function(opt) {
+  opt.addEventListener('click', function() {
+    sizeOptionsEl.querySelectorAll('.size-opt').forEach(function(o) { o.classList.remove('active'); });
+    opt.classList.add('active');
+    currentSize = opt.dataset.size;
+    if (loadedImage) { resetEditor(); drawEditor(); }
+  });
+});
 
 // ─────────────────────────────────────────
 // Download photo only
 // ─────────────────────────────────────────
 downloadPhotoBtn.addEventListener('click', function() {
+  renderPreviewFromEditor(); // sync editor position to output canvas
   previewCanvas.toBlob(function(blob) {
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -696,6 +882,7 @@ generateBtn.addEventListener('click', async function() {
     if (typeof JSZip === 'undefined') throw new Error('JSZip library not loaded. Please refresh and try again.');
 
     // Get photo as base64
+    renderPreviewFromEditor(); // sync editor position to output canvas
     var photoBlob = await new Promise(function(res) { previewCanvas.toBlob(res, 'image/png', 1.0); });
     var arrayBuf  = await photoBlob.arrayBuffer();
     var photoBytes = new Uint8Array(arrayBuf);
