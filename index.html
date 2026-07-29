@@ -364,7 +364,8 @@ h1 { font-size:22px; font-weight:700; color:var(--navy); margin-bottom:8px; }
 </div>
 
 <!-- docx library for in-browser Word file generation -->
-<script src="https://cdn.jsdelivr.net/npm/docx@9.0.0/build/index.umd.min.js"></script>
+<!-- JSZip for building .docx files in the browser -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
 <script>
 // ─────────────────────────────────────────
@@ -628,109 +629,127 @@ function buildPackageCards() {
 }
 
 // ─────────────────────────────────────────
-// Generate Word file — runs entirely in browser (no server needed)
-// Works on GitHub Pages, Render, or anywhere
+// Generate Word file — pure browser, no library needed
+// Builds the .docx ZIP structure manually using JSZip
 // ─────────────────────────────────────────
-var EMU  = 914400;
-var TWIP = 1440;
-var PAGE_W_TWIP  = 11906;
-var PAGE_H_TWIP  = 16838;
-var MARGIN_TWIP  = 173;
-var MARGIN_IN    = MARGIN_TWIP / TWIP;
-var BORDER_COLOR = 'D9D9D9';
-var BORDER_W_EMU = 3175;
+var EMU       = 914400;
+var TWIP      = 1440;
+var PAGE_W    = 11906;
+var PAGE_H    = 16838;
+var MARGIN_T  = 173;
+var MARGIN_IN = MARGIN_T / TWIP;
+var BORDER    = 'D9D9D9';
 
-function inchToEmu(inches) { return Math.round(inches * EMU); }
+function emu(inches) { return Math.round(inches * EMU); }
 
-function makeFloatingImg(imageBuffer, wIn, hIn, xIn, yIn) {
-  var d = window.docx;
-  return new d.ImageRun({
-    data: imageBuffer,
-    transformation: {
-      width:  inchToEmu(wIn) / 9525,
-      height: inchToEmu(hIn) / 9525,
-    },
-    floating: {
-      horizontalPosition: {
-        relative: d.HorizontalPositionRelativeFrom.PAGE,
-        offset: inchToEmu(xIn),
-      },
-      verticalPosition: {
-        relative: d.VerticalPositionRelativeFrom.PAGE,
-        offset: inchToEmu(yIn),
-      },
-      wrap: { type: d.TextWrappingType.NONE },
-      behindDocument: false,
-      zIndex: 1,
-    },
-    outline: {
-      type: 'solidFill',
-      solidFillType: 'rgb',
-      value: BORDER_COLOR,
-      width: BORDER_W_EMU,
-    },
+function buildDocXml(imageLayouts) {
+  // Each imageLayout: { rId, wEmu, hEmu, xEmu, yEmu }
+  var drawings = imageLayouts.map(function(img) {
+    return '<w:p><w:r><w:rPr/><mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"><mc:Choice Requires="wps"><w:drawing><wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="251658240" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><wp:simplePos x="0" y="0"/><wp:positionH relativeFrom="page"><wp:posOffset>' + img.xEmu + '</wp:posOffset></wp:positionH><wp:positionV relativeFrom="page"><wp:posOffset>' + img.yEmu + '</wp:posOffset></wp:positionV><wp:extent cx="' + img.wEmu + '" cy="' + img.hEmu + '"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:wrapNone/><wp:docPr id="' + img.id + '" name="Image' + img.id + '"/><wp:cNvGraphicFramePr/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="' + img.id + '" name="Image' + img.id + '"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="' + img.rId + '" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="' + img.wEmu + '" cy="' + img.hEmu + '"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln w="3175"><a:solidFill><a:srgbClr val="' + BORDER + '"/></a:solidFill></a:ln></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:anchor></w:drawing></mc:Choice></mc:AlternateContent></w:r></w:p>';
   });
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<w:document xmlns:wpc="http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas" xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:aink="http://schemas.microsoft.com/office/drawing/2016/ink" xmlns:am3d="http://schemas.microsoft.com/office/drawing/2017/model3d" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:oel="http://schemas.microsoft.com/office/2019/extlst" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:wp14="http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:w10="urn:schemas-microsoft-com:office:word" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml" xmlns:w16cex="http://schemas.microsoft.com/office/word/2018/wordml/cex" xmlns:w16cid="http://schemas.microsoft.com/office/word/2016/wordml/cid" xmlns:w16="http://schemas.microsoft.com/office/word/2018/wordml" xmlns:w16sdtdh="http://schemas.microsoft.com/office/word/2020/wordml/sdtdatahash" xmlns:w16se="http://schemas.microsoft.com/office/word/2015/wordml/symex" xmlns:wpg="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup" xmlns:wpi="http://schemas.microsoft.com/office/word/2010/wordprocessingInk" xmlns:wne="http://schemas.microsoft.com/office/word/2006/wordml" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape" mc:Ignorable="w14 w15 w16se w16cid w16 w16cex w16sdtdh wp14">' +
+    '<w:body>' + drawings.join('') +
+    '<w:sectPr><w:pgSz w:w="' + PAGE_W + '" w:h="' + PAGE_H + '"/><w:pgMar w:top="' + MARGIN_T + '" w:right="' + MARGIN_T + '" w:bottom="' + MARGIN_T + '" w:left="' + MARGIN_T + '" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr>' +
+    '</w:body></w:document>';
 }
 
-function buildImages(packageId, imageBuffer) {
-  var imgs = [];
+function buildRelsXml(count) {
+  var rels = [];
+  for (var i=1; i<=count; i++) {
+    rels.push('<Relationship Id="rId' + i + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image' + i + '.png"/>');
+  }
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+    rels.join('') + '</Relationships>';
+}
+
+function getLayouts(packageId) {
+  var layouts = [];
   if (packageId === 1) {
     for (var i=0; i<8; i++)
-      imgs.push(makeFloatingImg(imageBuffer, 1, 1, MARGIN_IN + i*1, MARGIN_IN));
+      layouts.push({ wIn:1, hIn:1, xIn: MARGIN_IN + i*1, yIn: MARGIN_IN });
   } else if (packageId === 2) {
     for (var r=0; r<2; r++)
       for (var c=0; c<4; c++)
-        imgs.push(makeFloatingImg(imageBuffer, 2, 2, MARGIN_IN + c*2, MARGIN_IN + r*2));
+        layouts.push({ wIn:2, hIn:2, xIn: MARGIN_IN + c*2, yIn: MARGIN_IN + r*2 });
   } else if (packageId === 3) {
     for (var c=0; c<4; c++)
-      imgs.push(makeFloatingImg(imageBuffer, 2, 2, MARGIN_IN + c*2, MARGIN_IN));
+      layouts.push({ wIn:2, hIn:2, xIn: MARGIN_IN + c*2, yIn: MARGIN_IN });
     for (var c=0; c<8; c++)
-      imgs.push(makeFloatingImg(imageBuffer, 1, 1, MARGIN_IN + c*1, MARGIN_IN + 2));
+      layouts.push({ wIn:1, hIn:1, xIn: MARGIN_IN + c*1, yIn: MARGIN_IN + 2 });
   } else if (packageId === 4) {
-    var pw = 1252220 / EMU;
-    var ph = 1617980 / EMU;
-    var startX = 524510 / EMU;
-    var stepX  = 1257935 / EMU;
-    var rowY   = [17780/EMU, 1641475/EMU];
+    var pw=1252220/EMU, ph=1617980/EMU, sx=524510/EMU, stepX=1257935/EMU;
+    var rowY=[17780/EMU, 1641475/EMU];
     for (var r=0; r<2; r++)
       for (var c=0; c<5; c++)
-        imgs.push(makeFloatingImg(imageBuffer, pw, ph, startX + c*stepX, rowY[r]));
+        layouts.push({ wIn:pw, hIn:ph, xIn: sx + c*stepX, yIn: rowY[r] });
   }
-  return imgs;
+  return layouts;
 }
 
 generateBtn.addEventListener('click', async function() {
   if (!currentPkg || !removedBlob) return;
   goStep(3);
   try {
-    // Check docx library is loaded
-    if (!window.docx) throw new Error('Document library not loaded yet. Please wait a moment and try again.');
+    // Check JSZip is loaded
+    if (typeof JSZip === 'undefined') throw new Error('JSZip library not loaded. Please refresh and try again.');
 
-    // Get canvas image as ArrayBuffer
+    // Get photo as base64
     var photoBlob = await new Promise(function(res) { previewCanvas.toBlob(res, 'image/png', 1.0); });
     var arrayBuf  = await photoBlob.arrayBuffer();
-    var imageBuffer = new Uint8Array(arrayBuf);
+    var photoBytes = new Uint8Array(arrayBuf);
 
-    // Build document
-    var d = window.docx;
-    var images = buildImages(currentPkg, imageBuffer);
-    var doc = new d.Document({
-      sections: [{
-        properties: {
-          page: {
-            size:   { width: PAGE_W_TWIP, height: PAGE_H_TWIP },
-            margin: { top: MARGIN_TWIP, right: MARGIN_TWIP, bottom: MARGIN_TWIP, left: MARGIN_TWIP },
-          },
-        },
-        children: [new d.Paragraph({ children: images })],
-      }],
+    var layouts = getLayouts(currentPkg);
+    var count   = layouts.length;
+
+    // All images use the same photo — map each slot to rId1 (one image, repeated)
+    var imageLayouts = layouts.map(function(l, i) {
+      return {
+        id:   i + 1,
+        rId:  'rId1', // all point to same image
+        wEmu: emu(l.wIn),
+        hEmu: emu(l.hIn),
+        xEmu: emu(l.xIn),
+        yEmu: emu(l.yIn),
+      };
     });
 
-    // Pack and download (toBlob is browser-compatible, toBuffer is Node.js only)
-    var blob = await d.Packer.toBlob(doc);
-    var pkg  = PACKAGES.find(function(p) { return p.id===currentPkg; });
+    // Build ZIP
+    var zip = new JSZip();
+    zip.file('[Content_Types].xml',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+      '<Default Extension="xml" ContentType="application/xml"/>' +
+      '<Default Extension="png" ContentType="image/png"/>' +
+      '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
+      '</Types>');
+
+    zip.file('_rels/.rels',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
+      '</Relationships>');
+
+    zip.file('word/document.xml', buildDocXml(imageLayouts));
+
+    // One image file, referenced by all slots
+    zip.file('word/media/image1.png', photoBytes);
+
+    // Relationships — all rId1..rIdN point to image1.png
+    var relsXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>' +
+      '</Relationships>';
+    zip.file('word/_rels/document.xml.rels', relsXml);
+
+    // Generate zip blob
+    var docxBlob = await zip.generateAsync({ type:'blob', mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+
+    var pkg = PACKAGES.find(function(p) { return p.id===currentPkg; });
     var a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
+    a.href = URL.createObjectURL(docxBlob);
     a.download = pkg.name.replace(' ','_') + '_layout.docx';
     a.click();
     doneSub.textContent = pkg.name + ' (' + pkg.desc + ') has been laid out on an A4 sheet and downloaded.';
