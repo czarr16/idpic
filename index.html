@@ -726,9 +726,8 @@ generateBtn.addEventListener('click', async function() {
       }],
     });
 
-    // Pack and download
-    var buf  = await d.Packer.toBuffer(doc);
-    var blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+    // Pack and download (toBlob is browser-compatible, toBuffer is Node.js only)
+    var blob = await d.Packer.toBlob(doc);
     var pkg  = PACKAGES.find(function(p) { return p.id===currentPkg; });
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
