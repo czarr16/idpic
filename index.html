@@ -101,7 +101,7 @@ h1 { font-size:22px; font-weight:700; color:var(--navy); margin-bottom:8px; }
   position:relative; border-radius:var(--radius); overflow:hidden;
   display:flex; align-items:center; justify-content:center;
   background: repeating-conic-gradient(#ddd 0% 25%, #fff 0% 50%) 0 0/16px 16px;
-  width:100%; aspect-ratio:1; cursor:grab; user-select:none;
+  width:100%; height:380px; cursor:grab; user-select:none;
 }
 .canvas-wrap.white-bg { background:#fff; }
 .canvas-wrap.grabbing { cursor:grabbing; }
@@ -492,8 +492,12 @@ fileInput.addEventListener('change', function() {
 async function handleFile(file) {
   if (!file.type.startsWith('image/')) return;
 
-  // Reset
-  removedBlob = null;
+  // Reset everything including cached image
+  removedBlob  = null;
+  loadedImage  = null;
+  pan          = { x:0, y:0 };
+  zoom         = 1.0;
+  if (zoomSlider) { zoomSlider.value = 100; zoomVal.textContent = '100%'; }
   noticeSuccess.classList.remove('active');
   noticeError.classList.remove('active');
   noticeBgLib.classList.remove('active');
@@ -565,20 +569,12 @@ function getOutputSize() {
   return { w: Math.round(s.w * DPI), h: Math.round(s.h * DPI) };
 }
 
-// Resize editor canvas to fill its container, keep aspect ratio of current size
+// Resize editor canvas to fill its container (fixed, never changes shape)
 function resizeEditorCanvas() {
   var wrap = canvasWrap;
   var rect = wrap.getBoundingClientRect();
-  var displaySize = Math.min(rect.width, rect.height || rect.width);
-  var outSize = getOutputSize();
-  var ar = outSize.w / outSize.h;
-  var dispW, dispH;
-  if (ar >= 1) { dispW = displaySize; dispH = Math.round(displaySize / ar); }
-  else         { dispH = displaySize; dispW = Math.round(displaySize * ar); }
-  editorCanvas.width  = dispW;
-  editorCanvas.height = dispH;
-  // Update canvasWrap aspect-ratio dynamically
-  wrap.style.aspectRatio = ar;
+  editorCanvas.width  = Math.round(rect.width)  || 600;
+  editorCanvas.height = Math.round(rect.height) || 380;
 }
 
 function drawEditor() {
@@ -592,13 +588,14 @@ function drawEditor() {
   ctx.clearRect(0,0,cw,ch);
   if (currentBg === 'white') { ctx.fillStyle='#fff'; ctx.fillRect(0,0,cw,ch); }
 
-  // Calculate base scale: fit image to fill the frame at zoom=1
+  // Calculate base scale: fit image inside the fixed frame at zoom=1
   var imgW = loadedImage.naturalWidth;
   var imgH = loadedImage.naturalHeight;
+  var imgAR = imgW / imgH;
   var frameAR = cw / ch;
-  var imgAR   = imgW / imgH;
-  if (imgAR > frameAR) baseScale = ch / imgH;
-  else                 baseScale = cw / imgW;
+  // Fit (not fill) — always show whole image scaled to fit
+  if (imgAR > frameAR) baseScale = cw / imgW;
+  else                 baseScale = ch / imgH;
 
   var scale = baseScale * zoom;
   var drawW = imgW * scale;
@@ -609,26 +606,49 @@ function drawEditor() {
   var cy = ch/2 + pan.y;
   ctx.drawImage(loadedImage, cx - drawW/2, cy - drawH/2, drawW, drawH);
 
-  // 3x3 grid overlay
+  // 3x3 grid overlay across whole frame
   ctx.strokeStyle = 'rgba(255,255,255,0.45)';
   ctx.lineWidth = 0.8;
   for (var i=1; i<3; i++) {
     ctx.beginPath(); ctx.moveTo(cw*i/3, 0); ctx.lineTo(cw*i/3, ch); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(0, ch*i/3); ctx.lineTo(cw, ch*i/3); ctx.stroke();
   }
-  // Slightly darker lines for visibility on light bg
-  ctx.strokeStyle = 'rgba(0,0,0,0.12)';
-  ctx.lineWidth = 0.8;
+  ctx.strokeStyle = 'rgba(0,0,0,0.1)';
   for (var i=1; i<3; i++) {
     ctx.beginPath(); ctx.moveTo(cw*i/3, 0); ctx.lineTo(cw*i/3, ch); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(0, ch*i/3); ctx.lineTo(cw, ch*i/3); ctx.stroke();
   }
 
-  // Crop outline border
-  ctx.strokeStyle = 'rgba(41,128,185,0.9)';
+  // Blue crop outline — always fits inside the frame
+  var s = SIZES[currentSize];
+  var sizeAR = s.w / s.h;
+  var frameAR2 = cw / ch;
+  var cropW, cropH;
+  if (sizeAR > frameAR2) {
+    // crop is wider than frame relative — fit by width
+    cropW = cw; cropH = Math.round(cw / sizeAR);
+  } else {
+    // crop is taller than frame relative — fit by height
+    cropH = ch; cropW = Math.round(ch * sizeAR);
+  }
+  // Safety cap
+  if (cropW > cw) { cropW = cw; }
+  if (cropH > ch) { cropH = ch; }
+  var cropX = (cw - cropW) / 2;
+  var cropY = (ch - cropH) / 2;
+
+  // Dim outside crop area
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fillRect(0,0,cw,cropY);
+  ctx.fillRect(0,cropY+cropH,cw,ch-cropY-cropH);
+  ctx.fillRect(0,cropY,cropX,cropH);
+  ctx.fillRect(cropX+cropW,cropY,cw-cropX-cropW,cropH);
+
+  // Blue outline
+  ctx.strokeStyle = 'rgba(41,128,185,0.95)';
   ctx.lineWidth = 2;
   ctx.setLineDash([]);
-  ctx.strokeRect(1, 1, cw-2, ch-2);
+  ctx.strokeRect(cropX+1, cropY+1, cropW-2, cropH-2);
 }
 
 // Drag to pan
@@ -693,25 +713,53 @@ function renderPreviewFromEditor() {
   // Reproduce same pan/zoom at output resolution
   var imgW = loadedImage.naturalWidth;
   var imgH = loadedImage.naturalHeight;
-  var frameAR = outW / outH;
-  var imgAR   = imgW / imgH;
+  var edW = editorCanvas.width;
+  var edH = editorCanvas.height;
+  var imgAR = imgW / imgH;
+  var frameAR = edW / edH;
+
+  // Same base scale as drawEditor (fit image in frame)
   var bs;
-  if (imgAR > frameAR) bs = outH / imgH;
-  else                 bs = outW / imgW;
+  if (imgAR > frameAR) bs = edW / imgW;
+  else                 bs = edH / imgH;
 
   var scale = bs * zoom;
   var drawW = imgW * scale;
   var drawH = imgH * scale;
 
-  // Pan needs to scale from display canvas to output canvas
-  var edW = editorCanvas.width;
-  var edH = editorCanvas.height;
-  var scaleX = outW / edW;
-  var scaleY = outH / edH;
-  var cx = outW/2 + pan.x * scaleX;
-  var cy = outH/2 + pan.y * scaleY;
+  // Centre + pan in display coords
+  var dispCx = edW/2 + pan.x;
+  var dispCy = edH/2 + pan.y;
 
-  ctx.drawImage(loadedImage, cx - drawW/2, cy - drawH/2, drawW, drawH);
+  // Crop frame in display coords
+  var s = SIZES[currentSize];
+  var sizeAR = s.w / s.h;
+  var edFrameAR = edW / edH;
+  var cropW, cropH;
+  if (sizeAR > edFrameAR) {
+    cropW = edW; cropH = Math.round(edW / sizeAR);
+  } else {
+    cropH = edH; cropW = Math.round(edH * sizeAR);
+  }
+  if (cropW > edW) cropW = edW;
+  if (cropH > edH) cropH = edH;
+  var cropX = (edW - cropW) / 2;
+  var cropY = (edH - cropH) / 2;
+
+  // Scale from crop-frame display coords to output coords
+  var scaleX = outW / cropW;
+  var scaleY = outH / cropH;
+
+  // Offset of image centre relative to crop frame centre
+  var relCx = dispCx - (cropX + cropW/2);
+  var relCy = dispCy - (cropY + cropH/2);
+
+  var outCx = outW/2 + relCx * scaleX;
+  var outCy = outH/2 + relCy * scaleY;
+  var outDrawW = drawW * scaleX;
+  var outDrawH = drawH * scaleY;
+
+  ctx.drawImage(loadedImage, outCx - outDrawW/2, outCy - outDrawH/2, outDrawW, outDrawH);
 }
 
 async function renderPreview() {
